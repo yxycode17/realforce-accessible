@@ -62,7 +62,7 @@ static class ConfigurationFile {
         if(rootFields.Except(root.Keys).Any())throw new IOException("配置文件顶层必要字段缺失。");
         if(ignored!=null)ignored.AddRange(root.Keys.Except(rootFields));
         if(Scalar(root["format"],"string")!="RealforceAccessibleConfiguration" || Scalar(root["formatVersion"],"number")!="1")throw new IOException("不支持的配置文件格式版本。");
-        if(Scalar(root["model"],"string")!="R3HB11" || root["model"].InnerText!=target.Device.Model)throw new IOException("配置文件与当前键盘型号不匹配。");
+        if(!Device.IsSupported(Scalar(root["model"],"string")) || root["model"].InnerText!=target.Device.Model)throw new IOException("配置文件与当前键盘型号不匹配。");
         if(Scalar(root["firmware"],"string")!=target.Firmware)throw new IOException("配置文件与当前键盘固件版本不匹配，已取消导入。");
         Version version;if(!Version.TryParse(Scalar(root["appVersion"],"string"),out version))throw new IOException("助手版本字段无效。");
         var expected=Values(target);var v=new Dictionary<string,string>();

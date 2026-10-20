@@ -92,6 +92,11 @@ static class Names {
 }
 sealed class Device {
     public string Path,Model;
+    public static bool IsSupported(string model) {
+        // Vendor layout routing uses only character 4: R3HB* -> R30B.r3k.
+        return model!=null && model.Length>4 && model.StartsWith("R3HB",StringComparison.OrdinalIgnoreCase)
+            && model.Skip(4).All(c=>(c>='0' && c<='9') || (c>='A' && c<='Z') || (c>='a' && c<='z'));
+    }
     public override string ToString() { return Model + (KeyboardEnumurator.isBleConnect(Path)?"（蓝牙）":"（USB）"); }
 }
 sealed class PhysicalKey {
@@ -201,12 +206,13 @@ static class Backend {
         var en=new KeyboardEnumurator(@"Topre\REALFORCE_Software\","","",true);
         try { foreach(var entry in en.GetDevicePathList()) {
             var k=new KeyboardEntryR3(); try { Check(k.GetDeviceInfo(entry.DevicePath),"识别设备");
-                if(k.ModelNumber.Equals("R3HB11",StringComparison.OrdinalIgnoreCase)) list.Add(new Device { Path=entry.DevicePath,Model=k.ModelNumber });
+                if(Device.IsSupported(k.ModelNumber)) list.Add(new Device { Path=entry.DevicePath,Model=k.ModelNumber.ToUpperInvariant() });
             } finally { k.HidClose(); }
         } } finally { en.EndPolling(); }
         return list;
     }
     static KeyboardEntryR3 Connect(Device d,bool settingsSession=true) {
+        if(!Device.IsSupported(d.Model))throw new IOException("此型号尚未适配。");
         Exclusive(); var k=new KeyboardEntryR3();
         try {
             Check(k.LoadProfile(Path.Combine(Program.RuntimeDirectory,"R30B.r3k")),"加载键盘布局");
@@ -216,7 +222,7 @@ static class Backend {
                 Check(k.GetDeviceInfo(d.Path),"识别键盘");
                 Check(k.HidOpen(d.Path),"连接键盘");
             }
-            if(!string.Equals(k.ModelNumber,d.Model,StringComparison.OrdinalIgnoreCase) || k.ModelNumber!="R3HB11") throw new IOException("设备型号发生变化，已停止操作。");
+            if(!string.Equals(k.ModelNumber,d.Model,StringComparison.OrdinalIgnoreCase) || !Device.IsSupported(k.ModelNumber)) throw new IOException("设备型号发生变化，已停止操作。");
             return k;
         } catch { k.HidClose(); throw; }
     }
@@ -228,6 +234,7 @@ static class Backend {
         var k=Connect(d,false);
         try {
             var s=new Snapshot { Device=d,Firmware=k.FirmwareVersion,Time=DateTime.Now };
+            if(d.Model!="R3HB11")s.Notes.Add(d.Model+"：依据原版 R3HB 共用布局及通信逻辑适配，尚未实机验证。");
             byte[] supported; Check(k.R3_GetSupportedFunctionInfo(out supported),"读取支持功能");
             if(supported==null || supported.Length<1) throw new IOException("无法读取设备功能。");
             if((supported[0]&16)!=0) throw new IOException("此版本暂不支持第三代 APC 设备。");
@@ -289,7 +296,7 @@ static class Backend {
     }
     public static void ValidateSupportedChanges(Dictionary<int,byte[]> original,Dictionary<int,byte[]> edit) {
         foreach(int block in new[]{50,51})if(edit.ContainsKey(block) && (!original.ContainsKey(block) || !edit[block].SequenceEqual(original[block])))
-            throw new IOException("R3HB11 不提供指示灯颜色或亮度自定义，已阻止该项写入。");
+            throw new IOException("当前适配的 R3HB 型号不提供指示灯颜色或亮度自定义，已阻止该项写入。");
     }
     public static void VerifyBaseline(Dictionary<int,byte[]> original,Func<int,byte[]> read) {
         foreach(var p in original) if(!read(p.Key).SequenceEqual(p.Value))
@@ -584,7 +591,7 @@ sealed class MainForm : Form {
     }
     void ExportConfiguration() {
         if(!ConfigurationReady())return;
-        using(var d=new SaveFileDialog{Filter="助手配置文件 (*.json)|*.json",DefaultExt="json",FileName="REALFORCE-R3HB11-"+DateTime.Now.ToString("yyyyMMdd-HHmmss")+".json"}) {
+        using(var d=new SaveFileDialog{Filter="助手配置文件 (*.json)|*.json",DefaultExt="json",FileName="REALFORCE-"+snapshot.Device.Model+"-"+DateTime.Now.ToString("yyyyMMdd-HHmmss")+".json"}) {
             if(d.ShowDialog(this)!=DialogResult.OK)return;
             try { File.WriteAllText(d.FileName,ConfigurationFile.Encode(snapshot),Encoding.UTF8);message.Text="配置已导出，包含助手当前的待保存编辑。";MessageBox.Show(this,"配置已导出。包含当前编辑值，未向键盘写入。","导出完成"); }
             catch(Exception ex){MessageBox.Show(this,ex.Message,"导出失败");}
@@ -607,6 +614,8 @@ sealed class MainForm : Form {
 static class Checks {
     static void Assert(bool yes,string message) { if(!yes)throw new Exception(message); }
     public static void Run() {
+        foreach(string model in new[]{"R3HB11","R3HB13","r3hb13","R3HB12","R3HB21","R3HB23"})Assert(Device.IsSupported(model),"supported HB family");
+        foreach(string model in new[]{null,"","R3HB","R3HB/11","R3HB11 ","R3HA11","R3HC11","R3HD11","R3HE11","R3HF11","R3HG11","R3HH11","R3HI11","R3SB11","R4HB11"})Assert(!Device.IsSupported(model),"unadapted model rejected");
         var s=new Snapshot{Device=new Device{Model="R3HB11"},Firmware="test",ShortcutCount=8};
         foreach(int b in new[]{45,48,49,52}.Concat(Enumerable.Range(56,40))) {s.Original[b]=new byte[32];s.Edit[b]=new byte[32];}
         s.Keys.Add(new PhysicalKey{Index=16,Name="test key"});
@@ -650,6 +659,10 @@ static class Checks {
         using(var f=new Editor("test")){f.AddShortcut(s,0);Assert(f.AcceptButton!=null && f.CancelButton!=null,"dialog keyboard buttons");}
         s.Original[40]=new byte[32];s.Edit[40]=new byte[32];s.SetName("Config & Test");s.CustomEco=true;
         string config=ConfigurationFile.Encode(s);
+        s.Device.Model="R3HB13";var hb13=ConfigurationFile.Decode(ConfigurationFile.Encode(s),s);
+        Assert(hb13.All(p=>p.Value.SequenceEqual(s.Edit[p.Key])),"HB13 configuration roundtrip");
+        rejected=false;try{ConfigurationFile.Decode(config,s);}catch(IOException){rejected=true;}Assert(rejected,"cross-model configuration rejected even with shared layout");
+        s.Device.Model="R3HB11";
         var imported=ConfigurationFile.Decode(config,s);
         Assert(imported.All(p=>p.Value.SequenceEqual(s.Edit[p.Key])),"configuration JSON roundtrip");
         imported[48][0]=5;Assert(s.Edit[48][0]==0 && s.Original[48][0]==0,"import isolates baseline and editor");
