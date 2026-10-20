@@ -96,7 +96,20 @@ JSON 的 `model`、`firmware` 等元数据仅用于校验，不会写入键盘�
 
 ## 从源码构建
 
-首次打包时，在 Windows PowerShell 中从已适配的原版目录收集依赖，然后构建：
+首次构建请按以下顺序准备：
+
+1. **先安装原版 REALFORCE CONNECT Software**，确保其中的 `RFSWLib.dll` 为本项目适配的 **4.1.1.0** 版本，并通过收集脚本的文件校验。
+2. 在项目根目录创建 `dist`，将原版安装目录中的以下两个文件复制进去，直接与助手 EXE 放在同一层，不保留 `Profile` 子目录：
+
+   | 原版安装目录中的文件 | 项目中的目标位置 |
+   | --- | --- |
+   | `RFSWLib.dll` | `dist\RFSWLib.dll` |
+   | `Profile\R30B.r3k` | `dist\R30B.r3k` |
+
+   也可以运行下面的 `Collect-Dependencies.ps1`，由脚本校验文件、创建 `dist` 并自动复制这两个依赖，无需手动复制。
+3. 在项目根目录运行 `build.ps1`，生成助手程序及使用说明。
+
+安装原版后，可在项目根目录的 Windows PowerShell 中依次执行：
 
 ```powershell
 .\tools\Collect-Dependencies.ps1
