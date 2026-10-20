@@ -57,6 +57,17 @@ sealed class Choice {
 }
 static class Names {
     public static SortedDictionary<int,string> Codes = new SortedDictionary<int,string>();
+    static readonly Dictionary<int,string> R3Special = new Dictionary<int,string> {
+        {4097,"保存键盘设置"},{4128,"APC 模式向前切换"},
+        {4224,"切换到蓝牙槽位 1"},{4225,"切换到蓝牙槽位 2"},
+        {4226,"切换到蓝牙槽位 3"},{4227,"切换到蓝牙槽位 4"},
+        {4228,"切换到 USB 连接"},{4249,"删除蓝牙配对"},
+        {4256,"开始蓝牙配对"},{4257,"退出蓝牙配对"},
+        {4258,"查看蓝牙配对状态"},{4272,"ECO 模式设置"},{4275,"查看电量"}
+    };
+    public static bool CanMap(int code,int shortcutCount) {
+        return Codes.ContainsKey(code) && (code<256 || code==4096 || R3Special.ContainsKey(code) || (code>=4320 && code<4320+shortcutCount) || code>=49152);
+    }
     public static readonly string[] Modifiers={"左 Ctrl","左 Shift","左 Alt","左 Win","右 Ctrl","右 Shift","右 Alt","右 Win"};
     public static readonly string[] Apc={"0.8 毫米","1.5 毫米","2.2 毫米","3.0 毫米"};
     public static readonly string[] Modes={"全部按键：0.8 毫米","全部按键：1.5 毫米","全部按键：2.2 毫米","全部按键：3.0 毫米","逐键配置 1","逐键配置 2"};
@@ -66,6 +77,7 @@ static class Names {
             string line; while((line=r.ReadLine())!=null) { var p=line.Split('\t'); int code; if(p.Length==2 && int.TryParse(p[0],out code) && !Codes.ContainsKey(code)) Codes.Add(code,p[1]); }
         }
         Codes[0]="未分配"; Codes[4096]="Fn";
+        foreach(var special in R3Special)Codes[special.Key]=special.Value;
         for(int i=0;i<16;i++) Codes[4320+i]="自定义快捷键 "+(i+1);
     }
     public static string Key(int value) { string n; return Codes.TryGetValue(value,out n)?n:"未知键码 0x"+value.ToString("X4"); }
@@ -115,6 +127,12 @@ sealed class Snapshot {
     }
     public int Mapping(int layer,int key) { int b=64+layer*8; return (Byte(b,key*2)<<8)|Byte(b,key*2+1); }
     public void SetMapping(int layer,int key,int value) { SetByte(64+layer*8,key*2,value>>8); SetByte(64+layer*8,key*2+1,value&255); }
+    public int OriginalMapping(int layer,int key) { int block=64+layer*8+key/16,offset=key%16*2;return (Original[block][offset]<<8)|Original[block][offset+1]; }
+    public void ValidateFnLocks() {
+        foreach(var key in Keys)for(int layer=0;layer<4;layer+=2)
+            if(Mapping(layer,key.Index)==4096 && Mapping(layer+1,key.Index)!=OriginalMapping(layer+1,key.Index))
+                throw new IOException(key.Name+" / "+Names.Layers[layer+1]+"：普通层设为 Fn 时，不能修改该键自身的 Fn 层。");
+    }
     public bool Dirty { get { return Original.Any(p=>!p.Value.SequenceEqual(Edit[p.Key])); } }
     public string Status() {
         return "型号："+Device.Model+"\r\n固件："+Firmware+"\r\n连接："+(KeyboardEnumurator.isBleConnect(Device.Path)?"蓝牙":"USB")+"\r\n电量："+Battery+"\r\n读取时间："+Time.ToString("HH:mm:ss")+
@@ -246,6 +264,7 @@ static class Backend {
         try{return read();}catch(Exception ex){throw new IOException("清零命令已成功，但重新读取统计失败。请按 F5 更新；不要因此重复清零。",ex);}
     }
     public static Snapshot Save(Snapshot s) {
+        s.ValidateFnLocks();
         ValidateSupportedChanges(s.Original,s.Edit);
         if(s.NeedsRefresh) throw new IOException("上次保存未完成，请先刷新设备。");
         if(!s.Dirty) return s;
@@ -361,6 +380,22 @@ sealed class Editor : Form {
     }
     public void Add(string label,IEnumerable<Choice> choices,int value,Action<int> change) {
         var combo=UI.Combo(label,choices,value); UI.Row(table,label,combo); updates.Add(()=>{int selected=UI.Value(combo);if(selected!=value)change(selected);});
+    }
+    public void AddMappingPair(Snapshot snap,PhysicalKey key,int layer,IEnumerable<Choice> choices) {
+        var normal=UI.Combo(Names.Layers[layer],choices,snap.Mapping(layer,key.Index));
+        var fn=UI.Combo(Names.Layers[layer+1],choices,snap.Mapping(layer+1,key.Index));
+        int originalFn=snap.OriginalMapping(layer+1,key.Index);
+        if(!fn.Items.Cast<Choice>().Any(x=>x.Value==originalFn))fn.Items.Add(new Choice(originalFn,Names.Key(originalFn)));
+        var info=new TextBox{ReadOnly=true,Width=330,AccessibleName=Names.Layers[layer+1]+"编辑状态"};
+        Action update=()=>{
+            bool locked=UI.Value(normal)==4096;
+            fn.Enabled=!locked;
+            if(locked)for(int i=0;i<fn.Items.Count;i++)if(((Choice)fn.Items[i]).Value==originalFn){fn.SelectedIndex=i;break;}
+            info.Text=locked?"普通层为 Fn；自身 Fn 层不可编辑，保留上次读取值。":"Fn 层可编辑。普通层改为 Fn 将撤销该层编辑。";
+        };
+        normal.SelectedIndexChanged+=(s,e)=>update();update();
+        UI.Row(table,Names.Layers[layer],normal);UI.Row(table,Names.Layers[layer+1],fn);UI.Row(table,"Fn 层编辑状态",info);
+        updates.Add(()=>{snap.SetMapping(layer,key.Index,UI.Value(normal));snap.SetMapping(layer+1,key.Index,UI.Value(normal)==4096?originalFn:UI.Value(fn));});
     }
     public void AddName(Snapshot snap) {
         string original=Snapshot.DeviceName(snap.Edit[40]);
@@ -501,8 +536,8 @@ sealed class MainForm : Form {
     void EditKey() {
         var k=keys.SelectedItem as PhysicalKey; if(snapshot==null || k==null || busy)return;
         using(var f=new Editor("编辑实体键："+k.Name)) {
-            var choices=Names.Codes.Where(p=>p.Key<256 || p.Key==4096 || (p.Key>=4320 && p.Key<4320+snapshot.ShortcutCount) || p.Key>=49152).Select(p=>new Choice(p.Key,p.Value)).ToList();
-            for(int l=0;l<4;l++){int layer=l; f.Add(Names.Layers[l],choices,snapshot.Mapping(l,k.Index),v=>snapshot.SetMapping(layer,k.Index,v));}
+            var choices=Names.Codes.Where(p=>Names.CanMap(p.Key,snapshot.ShortcutCount)).Select(p=>new Choice(p.Key,p.Value)).ToList();
+            for(int l=0;l<4;l+=2)f.AddMappingPair(snapshot,k,l,choices);
             for(int i=0;i<2;i++){int block=56+i*4; f.Add("逐键 APC 配置 "+(i+1),Enumerable.Range(0,4).Select(n=>new Choice(n,Names.Apc[n])),snapshot.Byte(block,k.Index),v=>snapshot.SetByte(block,k.Index,v));}
             if(f.ShowDialog(this)==DialogResult.OK){Render();message.Text="修改已暂存；点击“保存到键盘”后生效。";}
         }
@@ -626,6 +661,29 @@ static class Checks {
         }
         s.Edit[49][0]=1; var ignored=new List<string>();imported=ConfigurationFile.Decode(compact.Replace("\"settings\":{","\"battery\":99,\"settings\":{\"map\":0,\"pairing\":[1,2],\"rom.50\":255,"),s,ignored);
         Assert(ignored.Count==4 && imported[49][0]==1 && imported.All(p=>p.Value.SequenceEqual(s.Edit[p.Key])),"read-only and unknown fields ignored without importing reserved memory");
+        foreach(int code in new[]{4097,4128,4224,4225,4226,4227,4228,4249,4256,4257,4258,4272,4275}) {
+            Assert(Names.CanMap(code,s.ShortcutCount),"special function selectable");
+            using(var combo=UI.Combo("功能",Names.Codes.Where(p=>Names.CanMap(p.Key,s.ShortcutCount)).Select(p=>new Choice(p.Key,p.Value)),code))
+                Assert(combo.SelectedItem.ToString()==Names.Key(code) && !combo.SelectedItem.ToString().Contains("保留当前值"),"special function readable label");
+            s.SetMapping(1,16,code);string savedSpecial=ConfigurationFile.Encode(s);s.SetMapping(1,16,4);
+            var restored=new Snapshot{Edit=ConfigurationFile.Decode(savedSpecial,s)};
+            Assert(restored.Mapping(1,16)==code && s.Mapping(1,16)==4,"special function can be restored after reassignment without mutating editor");
+        }
+        Assert(!Names.CanMap(4160,s.ShortcutCount) && !Names.CanMap(4288,s.ShortcutCount),"unsupported LED and macro functions remain excluded");
+        s.SetMapping(0,16,4096);s.SetMapping(1,16,4);
+        rejected=false;try{s.ValidateFnLocks();}catch(IOException){rejected=true;}Assert(rejected,"save validation rejects changes to Fn key own Fn layer");
+        ignored.Clear();var lockedImport=new Snapshot{Edit=ConfigurationFile.Decode(ConfigurationFile.Encode(s),s,ignored)};
+        Assert(lockedImport.Mapping(0,16)==4096 && lockedImport.Mapping(1,16)==s.OriginalMapping(1,16) && ignored.Count==1,"import preserves locked Fn layer and reports ignored change");
+        using(var f=new Editor("Fn lock test")) {
+            f.AddMappingPair(s,s.Keys[0],0,Names.Codes.Where(p=>Names.CanMap(p.Key,s.ShortcutCount)).Select(p=>new Choice(p.Key,p.Value)));
+            var combos=f.Controls.OfType<TableLayoutPanel>().Single().Controls.OfType<ComboBox>().ToList();
+            var normal=combos.Single(c=>c.AccessibleName==Names.Layers[0]);var fn=combos.Single(c=>c.AccessibleName==Names.Layers[1]);
+            Assert(!fn.Enabled && UI.Value(fn)==s.OriginalMapping(1,16),"Fn layer disabled and stale edit reverted on dialog creation");
+            normal.SelectedIndex=normal.Items.Cast<Choice>().ToList().FindIndex(c=>c.Value==4);Assert(fn.Enabled,"Fn layer unlocked when normal ceases to be Fn");
+            fn.SelectedIndex=fn.Items.Cast<Choice>().ToList().FindIndex(c=>c.Value==5);
+            normal.SelectedIndex=normal.Items.Cast<Choice>().ToList().FindIndex(c=>c.Value==4096);
+            Assert(!fn.Enabled && UI.Value(fn)==s.OriginalMapping(1,16),"changing normal to Fn reverts pending Fn layer edit");
+        }
         File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"self-test.txt"),"PASS: configuration roundtrip, reserved byte preservation, baseline isolation and malformed/incompatible import rejection; big-endian mapping; block boundaries; dirty detection; shortcut decoding; external change rejection; readback mismatch rejection; write error propagation; statistics sorting; name validation; UI construction.\r\nNo device I/O performed.");
     }
 }

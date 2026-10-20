@@ -72,7 +72,7 @@ static class ConfigurationFile {
         }
         if(v.Count!=expected.Count)throw new IOException("配置项目不完整，或快捷键数量、键盘布局不匹配。");
         // Work on a copy. A rejected file must never partially change the editor.
-        var copy=new Snapshot{Edit=target.Edit.ToDictionary(p=>p.Key,p=>(byte[])p.Value.Clone())};
+        var copy=new Snapshot{Original=target.Original,Keys=target.Keys,Edit=target.Edit.ToDictionary(p=>p.Key,p=>(byte[])p.Value.Clone())};
         copy.SetName(v["name"]);
         copy.SetByte(48,0,Number(v,"apc",5));copy.SetByte(52,0,Number(v,"eco",4));
         if(target.CustomEco) {
@@ -83,13 +83,19 @@ static class ConfigurationFile {
         foreach(var k in target.Keys) {
             for(int layer=0;layer<4;layer++) {
                 int code=Number(v,"key."+k.Index+".layer."+layer,65535);
-                bool supported=Names.Codes.ContainsKey(code) && (code<256 || code==4096 || (code>=4320 && code<4320+target.ShortcutCount) || code>=49152);
+                if(layer%2==1 && copy.Mapping(layer-1,k.Index)==4096) {
+                    int original=target.OriginalMapping(layer,k.Index);
+                    if(code!=original && ignored!=null)ignored.Add("settings.key."+k.Index+".layer."+layer+"（普通层为 Fn，该层锁定）");
+                    copy.SetMapping(layer,k.Index,original);continue;
+                }
+                bool supported=Names.CanMap(code,target.ShortcutCount);
                 if(!supported && code!=target.Mapping(layer,k.Index))throw new IOException("导入包含助手尚不支持的新映射："+code+"。只能保留该键当前已有的特殊映射。");
                 copy.SetMapping(layer,k.Index,code);
             }
             for(int apc=0;apc<2;apc++)copy.SetByte(56+apc*4,k.Index,Number(v,"key."+k.Index+".apc."+apc,3));
         }
         for(int i=0;i<target.ShortcutCount*2;i++)copy.SetByte(45,i,Number(v,"shortcut."+i,i%2==0?255:223));
+        copy.ValidateFnLocks();
         return copy.Edit;
     }
     public static Dictionary<int,byte[]> Read(string path,Snapshot target,List<string> ignored=null) {
