@@ -1,0 +1,238 @@
+0	Non(Unallocated)
+4	A
+5	B
+6	C
+7	D
+8	E
+9	F
+10	G
+11	H
+12	I
+13	J
+14	K
+15	L
+16	M
+17	N
+18	O
+19	P
+20	Q
+21	R
+22	S
+23	T
+24	U
+25	V
+26	W
+27	X
+28	Y
+29	Z
+30	1
+31	2
+32	3
+33	4
+34	5
+35	6
+36	7
+37	8
+38	9
+39	0
+40	Enter
+41	Esc
+42	Back Space
+43	Tab
+44	Space Bar
+45	-
+46	=
+47	[
+48	]
+49	\\ |
+50	NonUS #
+51	;
+52	'
+53	`
+54	,
+55	.
+56	/
+57	Caps Lock
+58	F1
+59	F2
+60	F3
+61	F4
+62	F5
+63	F6
+64	F7
+65	F8
+66	F9
+67	F10
+68	F11
+69	F12
+104	F13
+105	F14
+106	F15
+107	F16
+108	F17
+109	F18
+110	F19
+111	F20
+112	F21
+113	F22
+114	F23
+115	F24
+70	Print Scrn
+71	Scrol Lock
+72	Pause
+73	Insert
+74	Home
+75	Page Up
+76	Delete
+77	End
+78	Page Down
+79	Right Arrow
+80	Left Arrow
+81	Down Arrow
+82	Up Arrow
+83	Num Lock
+84	KP /
+85	KP *
+86	KP -
+87	KP +
+88	KP Enter
+89	KP 1
+90	KP 2
+91	KP 3
+92	KP 4
+93	KP 5
+94	KP 6
+95	KP 7
+96	KP 8
+97	KP 9
+98	KP 0
+99	KP .
+100	NonUS \\
+101	App
+103	KP =
+133	KP Comma
+135	Int1
+136	Int2
+137	Int3
+138	Int4
+139	Int5
+144	Lang1
+145	Lang2
+224	L-Ctrl
+225	L-Shift
+226	L-Alt / L-Opt
+227	L-Win / L-Cmd
+228	R-Ctrl
+229	R-Shift
+230	R-Alt / R-Opt
+231	R-Win / R-Cmd
+49263	Bright +
+49264	Bright -
+49333	Next Track
+49334	Prev Track
+49335	Stop
+49336	Eject
+49357	Play Pause
+49378	Mute
+49385	Vol Up
+49386	Vol Down
+49539	AL Player
+49546	AL Mail
+49554	AL Calc
+49556	AL Brows
+49697	AC Search
+49699	AC Home
+49700	AC Back
+49701	AC Forward
+49703	AC Refresh
+49706	AC Book
+4096	Fn
+4097	Save
+4128	APC+
+4176	Stroke Clear
+4288	M1
+4289	M2
+4290	M3
+4291	M4
+4292	M5
+4293	M6
+4294	M7
+4295	M8
+4304	Easy macro rec
+4305	Easy macro play
+4160	LED Brt
+4163	LED Col
+4224	Slot1
+4225	Slot2
+4226	Slot3
+4227	Slot4
+4228	USB
+4249	Pair Del
+4256	Pair Run
+4257	Pair Esc
+4258	Pair Chk
+4272	Eco
+4275	Batt Chk
+4115	A/B Change
+4129	APC-
+4192	Illumi bright+
+4193	Illumi bright-
+4195	Illumi mode+
+4196	Illumi mode-
+4198	Illumi easy color
+4200	Illumi power on+
+4201	Illumi power on-
+4131	APC Custom1
+4132	APC Custom2
+4320	Shortcut1
+4321	Shortcut2
+4322	Shortcut3
+4323	Shortcut4
+4324	Shortcut5
+4325	Shortcut6
+4326	Shortcut7
+4327	Shortcut8
+4115	Keymap+
+4116	Keymap1 Select
+4117	Keymap2 Select
+4118	Keymap3 Select
+4119	Keymap4 Select
+4129	APC-
+4131	APC1 Select
+4132	APC2 Select
+4133	APC3 Select
+4134	APC4 Select
+4106	Num Link
+4328	Shortcut9
+4329	Shortcut10
+4330	Shortcut11
+4331	Shortcut12
+4332	Shortcut13
+4333	Shortcut14
+4334	Shortcut15
+4335	Shortcut16
+4120	Map1_Momentary
+4121	Map2_Momentary
+4124	Map1Fn_Momentary
+4125	Map2Fn_Momentary
+4122	Map3_Momentary
+4123	Map4_Momentary
+4126	Map3Fn_Momentary
+4127	Map4Fn_Momentary
+4144	Mouse L-Click
+4145	Mouse R-Click
+4146	Mouse M-Click
+4147	Mouse Back
+4148	Mouse Fwrd
+4149	Mouse Y-Up
+4150	Mouse Y-Dn
+4151	Mouse X-Up
+4152	Mouse X-Dn
+4153	Mouse Whl-Up
+4154	Mouse Whl-Dn
+4155	Mouse L-Tilt
+4156	Mouse R-Tilt
+4177	Scene1 Select
+4178	Scene2 Select
+4179	Scene3 Select
+4180	Scene4 Select

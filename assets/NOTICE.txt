@@ -1,0 +1,4 @@
+助手图标以本机安装的 REALFORCE Software 图标为参考设计，保留红色几何元素，并添加蓝色无障碍标记。
+original-icon-reference.png 为原图标参考；assistant.png 为派生设计；assistant.ico 为应用使用的多尺寸图标。
+REALFORCE、Topre 及原标识的相关权利归其权利人所有。使用派生图标不表示本项目获得官方认可。
+本项目为 yxycode17 独立开发的辅助工具，非 Topre 官方软件。

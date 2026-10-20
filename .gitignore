@@ -1,0 +1,10 @@
+/release/
+/bin/
+/release-*/
+*.exe
+*.pdb
+**/probe.txt
+**/self-test.txt
+**/last-error.txt
+.vs/
+obj/
