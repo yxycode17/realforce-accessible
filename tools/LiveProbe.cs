@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -13,7 +13,7 @@ class RawStatus : KeyboardEntryR3 {
 }
 class LiveProbe {
     static int Main(string[] args) {
-        AppDomain.CurrentDomain.AssemblyResolve+=(s,e)=>{string p=Path.Combine(@"C:\Program Files (x86)\Topre\REALFORCE CONNECT Software",new AssemblyName(e.Name).Name+".dll");return File.Exists(p)?Assembly.LoadFrom(p):null;};
+        AppDomain.CurrentDomain.AssemblyResolve+=(s,e)=>{string p=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,new AssemblyName(e.Name).Name+".dll");return File.Exists(p)?Assembly.LoadFrom(p):null;};
         try { return Run(args); } catch(Exception ex) { Console.WriteLine(ex);return 1; }
     }
     [MethodImpl(MethodImplOptions.NoInlining)] static int Run(string[] args) {

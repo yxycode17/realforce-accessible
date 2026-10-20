@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -16,13 +16,15 @@ using RFSWLib;
 
 namespace RealforceAccessible {
 static class Program {
-    public static readonly string Install = @"C:\Program Files (x86)\Topre\REALFORCE CONNECT Software";
+    public static readonly string RuntimeDirectory = AppDomain.CurrentDomain.BaseDirectory;
     [STAThread] static int Main(string[] args) {
-        AppDomain.CurrentDomain.AssemblyResolve += (s,e) => {
-            string p = Path.Combine(Install, new AssemblyName(e.Name).Name + ".dll");
-            return File.Exists(p) ? Assembly.LoadFrom(p) : null;
-        };
-        try { return Run(args); } catch(Exception e) {
+        try {
+            foreach(string name in new[]{"RFSWLib.dll","R30B.r3k"})
+                if(!File.Exists(Path.Combine(RuntimeDirectory,name)))
+                    throw new FileNotFoundException("程序同目录缺少依赖文件："+name+"。请复制完整 dist 目录。");
+            Assembly.LoadFrom(Path.Combine(RuntimeDirectory,"RFSWLib.dll"));
+            return Run(args);
+        } catch(Exception e) {
             File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"last-error.txt"), e.ToString());
             if(args.Length == 0) MessageBox.Show(e.Message,"REALFORCE 无障碍助手");
             return 1;
@@ -32,12 +34,18 @@ static class Program {
         Names.Load();
         if(args.Length > 0 && args[0] == "--probe") {
             var devices = Backend.Discover();
-            string output = "找到设备：" + devices.Count + "\r\n";
+            string output = "通信库："+typeof(KeyboardEntryR3).Assembly.Location+"\r\n找到设备：" + devices.Count + "\r\n";
             foreach(var d in devices) { var s = Backend.Read(d); output += s.Report() + "\r\n"; }
             File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"probe.txt"),output,Encoding.UTF8);
             return devices.Count == 0 ? 2 : 0;
         }
         if(args.Length > 0 && args[0] == "--self-test") { Checks.Run(); return 0; }
+        if(args.Length > 0 && args[0] == "--configuration-test") {
+            var ds=Backend.Discover();if(ds.Count!=1)throw new IOException("此检查要求连接一台支持的键盘。");
+            var s=Backend.Read(ds[0]);var imported=ConfigurationFile.Decode(ConfigurationFile.Encode(s),s);
+            if(imported.Any(p=>!p.Value.SequenceEqual(s.Edit[p.Key])))throw new IOException("配置往返不一致。");
+            File.WriteAllText(Path.Combine(RuntimeDirectory,"configuration-test.txt"),"PASS: real device read and JSON roundtrip; "+s.Keys.Count+" keys; no device writes.");return 0;
+        }
         Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
         Application.Run(new MainForm()); return 0;
     }
@@ -144,10 +152,13 @@ sealed class Snapshot {
         for(int i=0;i<ShortcutCount;i++) if(Original[45][i*2]!=Edit[45][i*2] || Original[45][i*2+1]!=Edit[45][i*2+1])
             lines.Add("快捷键 "+(i+1)+"："+Names.Shortcut(Original[45][i*2],Original[45][i*2+1])+" → "+Names.Shortcut(Byte(45,i*2),Byte(45,i*2+1)));
         if(Original[48][0]!=Edit[48][0]) lines.Add("APC 模式："+Names.Mode(Original[48][0])+" → "+Names.Mode(Edit[48][0]));
-        if(Original[49][0]!=Edit[49][0]) lines.Add("映射配置："+Original[49][0]+" → "+Edit[49][0]+"（0=A，1=B）");
+        if(Original[49][0]!=Edit[49][0]) lines.Add("当前键盘方案："+(Original[49][0]==0?"A":"B")+" → "+(Edit[49][0]==0?"A":"B"));
         if(Original[52][0]!=Edit[52][0]) lines.Add("ECO："+Names.Eco(Original[52][0])+" → "+Names.Eco(Edit[52][0]));
         if(CustomEco && !Original[54].SequenceEqual(Edit[54])) lines.Add("ECO 自定义："+EcoDetails(Original[54])+" → "+EcoDetails(Edit[54]));
-        return lines;
+        return lines.Select(line=>{
+            int colon=line.IndexOf('：'),arrow=line.IndexOf(" → ",StringComparison.Ordinal);
+            return colon<0 || arrow<0?line:line.Substring(0,colon)+"\r\n  当前值（上次读取）："+line.Substring(colon+1,arrow-colon-1)+"\r\n  目标值："+line.Substring(arrow+3);
+        }).ToList();
     }
     public string Report() { return Status()+"\r\n\r\n配对槽位：\r\n"+PairingText()+"\r\n\r\n按键统计："+StatisticsSummary()+"\r\n"+(KeyCounts==null?"":string.Join("\r\n",RankedKeys().Select(k=>k.Name+"："+KeyCounts[k.Index]+" 次")))+"\r\n\r\n"+string.Join("\r\n",Keys.Select(KeyDetails))+"\r\n"+
         string.Join("\r\n",Enumerable.Range(0,ShortcutCount).Select(i=>"快捷键 "+(i+1)+"："+Names.Shortcut(Byte(45,i*2),Byte(45,i*2+1)))); }
@@ -155,7 +166,9 @@ sealed class Snapshot {
 static class Backend {
     const string SupportedLibrary="291fc248d9a9cf0b5e9275b9e4c8dfe2e5c59f60e09e1486b0c6e63e4c642a3e";
     static void CheckLibrary() {
-        using(var hash=SHA256.Create()) using(var f=File.OpenRead(Path.Combine(Program.Install,"RFSWLib.dll")))
+        if(!string.Equals(Path.GetFullPath(typeof(KeyboardEntryR3).Assembly.Location),Path.GetFullPath(Path.Combine(Program.RuntimeDirectory,"RFSWLib.dll")),StringComparison.OrdinalIgnoreCase))
+            throw new IOException("通信库必须从程序同目录加载。");
+        using(var hash=SHA256.Create()) using(var f=File.OpenRead(Path.Combine(Program.RuntimeDirectory,"RFSWLib.dll")))
             if(BitConverter.ToString(hash.ComputeHash(f)).Replace("-","").ToLowerInvariant()!=SupportedLibrary)
                 throw new IOException("REALFORCE 库版本与已分析版本不同，已停止连接。请更新适配后重试。");
     }
@@ -178,7 +191,7 @@ static class Backend {
     static KeyboardEntryR3 Connect(Device d,bool settingsSession=true) {
         Exclusive(); var k=new KeyboardEntryR3();
         try {
-            Check(k.LoadProfile(Path.Combine(Program.Install,"Profile","R30B.r3k")),"加载键盘布局");
+            Check(k.LoadProfile(Path.Combine(Program.RuntimeDirectory,"R30B.r3k")),"加载键盘布局");
             if(settingsSession) Check(k.Open(d.Path),"连接键盘");
             else {
                 // Reading must not send App_Start/App_End, which belong to an editing session.
@@ -273,11 +286,29 @@ static class Backend {
     }
 }
 
+// Framework ComboBox UIA selection events can be ignored by NVDA because the
+// provider lacks the matching Selection pattern (dotnet/winforms#7764).
+// Keep the native MSAA interface and Windows UIA proxy for these controls only.
+sealed class AccessibleComboBox : ComboBox {
+    protected override void WndProc(ref Message m) {
+        const int WM_GETOBJECT=0x003D;
+        const int UiaRootObjectId=-25;
+        if(m.Msg==WM_GETOBJECT && unchecked((int)m.LParam.ToInt64())==UiaRootObjectId) {
+            m.Result=IntPtr.Zero; return;
+        }
+        base.WndProc(ref m);
+    }
+    protected override void OnSelectedIndexChanged(EventArgs e) {
+        base.OnSelectedIndexChanged(e);
+        if(IsHandleCreated && Focused && !DroppedDown)
+            AccessibilityNotifyClients(AccessibleEvents.ValueChange,-1);
+    }
+}
 static class UI {
     public static Button Button(string text,EventHandler click) { var b=new Button { Text=text,AutoSize=true,MinimumSize=new Size(110,32),Margin=new Padding(5) }; b.Click+=click; return b; }
     public static TextBox ReadText(string name,int height) { return new TextBox { AccessibleName=name,ReadOnly=true,Multiline=true,ScrollBars=ScrollBars.Vertical,Height=height,Dock=DockStyle.Fill,TabStop=true }; }
     public static ComboBox Combo(string name,IEnumerable<Choice> choices,int value) {
-        var c=new ComboBox { AccessibleName=name,DropDownStyle=ComboBoxStyle.DropDownList,Width=330 };
+        var c=new AccessibleComboBox { AccessibleName=name,DropDownStyle=ComboBoxStyle.DropDownList,Width=330 };
         foreach(var p in choices) c.Items.Add(p);
         for(int i=0;i<c.Items.Count;i++) if(((Choice)c.Items[i]).Value==value) c.SelectedIndex=i;
         if(c.SelectedIndex<0) { c.Items.Add(new Choice(value,"保留当前值（"+value+"）")); c.SelectedIndex=c.Items.Count-1; }
@@ -303,6 +334,17 @@ static class UI {
             var cancel=Button("取消退出(&C)",(s,e)=>f.DialogResult=DialogResult.Cancel);
             buttons.Controls.Add(save);buttons.Controls.Add(discard);buttons.Controls.Add(cancel);f.Controls.Add(summary);f.Controls.Add(buttons);f.CancelButton=cancel;
             f.Shown+=(s,e)=>cancel.Focus();return f.ShowDialog(owner);
+        }
+    }
+    public static bool ConfirmSave(IWin32Window owner,string changes) {
+        using(var f=new Form{Text="确认保存到键盘",Size=new Size(760,560),StartPosition=FormStartPosition.CenterParent,Font=SystemFonts.MessageBoxFont}) {
+            var summary=ReadText("逐项配置变更：当前值与目标值",420);
+            summary.Text="以下为最近一次读取值与目标值。写入前会再次核对键盘配置，发现外部变化将停止保存。\r\n\r\n"+changes;
+            var buttons=new FlowLayoutPanel{Dock=DockStyle.Bottom,Height=60};
+            var save=Button("确认保存(&S)",(s,e)=>f.DialogResult=DialogResult.OK);
+            var cancel=Button("取消(&C)",(s,e)=>f.DialogResult=DialogResult.Cancel);
+            buttons.Controls.Add(save);buttons.Controls.Add(cancel);f.Controls.Add(summary);f.Controls.Add(buttons);f.CancelButton=cancel;
+            f.Shown+=(s,e)=>{summary.Focus();summary.Select(0,0);};return f.ShowDialog(owner)==DialogResult.OK;
         }
     }
 }
@@ -338,7 +380,7 @@ sealed class Editor : Form {
     }
 }
 sealed class MainForm : Form {
-    ComboBox devices=new ComboBox{AccessibleName="设备",DropDownStyle=ComboBoxStyle.DropDownList,Width=220};
+    ComboBox devices=new AccessibleComboBox{AccessibleName="设备",DropDownStyle=ComboBoxStyle.DropDownList,Width=220};
     TabControl tabs=new TabControl{Dock=DockStyle.Fill,AccessibleName="设置分区",TabIndex=1};
     TextBox status=UI.ReadText("设备状态",300),details=UI.ReadText("所选按键的设置",180),search=new TextBox{AccessibleName="搜索实体按键",Width=260};
     ListBox keys=new ListBox{Dock=DockStyle.Fill,AccessibleName="实体按键列表",IntegralHeight=false};
@@ -365,7 +407,10 @@ sealed class MainForm : Form {
         var pairingPage=new TabPage("配对槽位");pairingPage.Controls.Add(pairingSummary);tabs.TabPages.Add(pairingPage);
         var bottom=new FlowLayoutPanel{Dock=DockStyle.Bottom,AutoSize=true,AutoSizeMode=AutoSizeMode.GrowAndShrink,AccessibleName="修改与保存",TabIndex=2};
         bottom.Controls.Add(UI.Button("改动清单(&L)",(s,e)=>ShowChanges())); bottom.Controls.Add(UI.Button("保存到键盘(&S)",async(s,e)=>await Save()));
-        bottom.Controls.Add(UI.Button("放弃修改(&R)",(s,e)=>Discard())); bottom.Controls.Add(UI.Button("导出状态(&X)",(s,e)=>Export())); bottom.Controls.Add(UI.Button("关闭(&C)",(s,e)=>Close()));
+        bottom.Controls.Add(UI.Button("放弃修改(&R)",(s,e)=>Discard()));
+        bottom.Controls.Add(UI.Button("导入配置(&I)",(s,e)=>ImportConfiguration()));
+        bottom.Controls.Add(UI.Button("导出配置(&X)",(s,e)=>ExportConfiguration()));
+        bottom.Controls.Add(UI.Button("关闭(&C)",(s,e)=>Close()));
         Controls.Add(tabs); Controls.Add(top); Controls.Add(bottom); Controls.Add(message);
         bottom.Controls.Add(UI.Button("关于(&A)",(s,e)=>UI.TextDialog(this,"关于助手",AppInfo.About)));
         search.TextChanged+=(s,e)=>Filter(); keys.SelectedIndexChanged+=(s,e)=>KeyDetails(); keys.DoubleClick+=(s,e)=>EditKey(); shortcuts.DoubleClick+=(s,e)=>EditShortcut();
@@ -397,6 +442,7 @@ sealed class MainForm : Form {
             ActiveControl=target;
             target.Select();
             if(ContainsFocus)target.Focus();
+            if(target==status){status.Select(0,0);status.ScrollToCaret();}
         }));
     }
     async Task Work(Func<Task> work,Control focusAfter=null) {
@@ -423,6 +469,7 @@ sealed class MainForm : Form {
     }
     void Render() {
         status.Text=snapshot==null?"尚未读取设备。使用“查找设备”，选择后按 F5。":snapshot.Status();
+        status.Select(0,0); status.ScrollToCaret();
         Filter(); int old=shortcuts.SelectedIndex; shortcuts.Items.Clear(); if(snapshot!=null)for(int i=0;i<snapshot.ShortcutCount;i++)shortcuts.Items.Add("快捷键 "+(i+1)+"："+Names.Shortcut(snapshot.Byte(45,i*2),snapshot.Byte(45,i*2+1)));
         if(shortcuts.Items.Count>0)shortcuts.SelectedIndex=Math.Max(0,Math.Min(old,shortcuts.Items.Count-1));
         if(snapshot!=null && snapshot.ShortcutCount==0)shortcuts.Items.Add("设备未报告自定义快捷键支持。");
@@ -489,13 +536,38 @@ sealed class MainForm : Form {
     async Task<bool> Save(bool confirm=true) {
         if(snapshot==null || busy || !snapshot.Dirty){if(confirm)MessageBox.Show(this,"没有待保存的修改。");return false;}
         string changes=string.Join("\r\n",snapshot.Changes());
-        if(confirm && MessageBox.Show(this,changes+"\r\n\r\n确认将以上修改保存到键盘？","保存到键盘",MessageBoxButtons.YesNo,MessageBoxIcon.Question,MessageBoxDefaultButton.Button2)!=DialogResult.Yes)return false;
+        if(confirm && !UI.ConfirmSave(this,changes))return false;
         bool saved=false;
         await Work(async()=>{try{snapshot=await Task.Run(()=>Backend.Save(snapshot));saved=true;}finally{Render();}message.Text="已保存并重新读取核对。";if(confirm)MessageBox.Show(this,"已保存到键盘，设备读回数据与设置一致。","保存完成");});
         return saved;
     }
     void Discard() { if(snapshot==null || !ConfirmDiscard())return; foreach(var p in snapshot.Original)snapshot.Edit[p.Key]=(byte[])p.Value.Clone();Render(); }
-    void Export() { if(snapshot==null)return; using(var d=new SaveFileDialog{Filter="文本文件|*.txt",FileName="REALFORCE 状态.txt"})if(d.ShowDialog(this)==DialogResult.OK)File.WriteAllText(d.FileName,snapshot.Report(),Encoding.UTF8); }
+    bool ConfigurationReady() {
+        if(busy)return false;
+        if(snapshot==null || snapshot.NeedsRefresh){MessageBox.Show(this,"请先按 F5 成功读取键盘配置。","配置文件");return false;}
+        return true;
+    }
+    void ExportConfiguration() {
+        if(!ConfigurationReady())return;
+        using(var d=new SaveFileDialog{Filter="助手配置文件 (*.json)|*.json",DefaultExt="json",FileName="REALFORCE-R3HB11-"+DateTime.Now.ToString("yyyyMMdd-HHmmss")+".json"}) {
+            if(d.ShowDialog(this)!=DialogResult.OK)return;
+            try { File.WriteAllText(d.FileName,ConfigurationFile.Encode(snapshot),Encoding.UTF8);message.Text="配置已导出，包含助手当前的待保存编辑。";MessageBox.Show(this,"配置已导出。包含当前编辑值，未向键盘写入。","导出完成"); }
+            catch(Exception ex){MessageBox.Show(this,ex.Message,"导出失败");}
+        }
+    }
+    void ImportConfiguration() {
+        if(!ConfigurationReady())return;
+        using(var d=new OpenFileDialog{Filter="助手配置文件 (*.json)|*.json",CheckFileExists=true}) {
+            if(d.ShowDialog(this)!=DialogResult.OK)return;
+            try {
+                var ignored=new List<string>();var imported=ConfigurationFile.Read(d.FileName,snapshot,ignored);
+                if(snapshot.Dirty && MessageBox.Show(this,"导入将替换助手中尚未保存的配置编辑。是否继续？","导入配置",MessageBoxButtons.YesNo,MessageBoxIcon.Question,MessageBoxDefaultButton.Button2)!=DialogResult.Yes)return;
+                snapshot.Edit=imported;Render();
+                message.Text=snapshot.Dirty?"配置已导入，尚未写入键盘。请检查改动清单后保存。":"导入配置与上次读取值相同，没有待保存的修改。";
+                UI.TextDialog(this,"导入结果：尚未写入键盘",message.Text+"\r\n\r\n"+string.Join("\r\n",snapshot.Changes())+(ignored.Count==0?"":"\r\n\r\n已忽略非可修改字段：\r\n"+string.Join("\r\n",ignored)));RestoreFocus(status);
+            }catch(Exception ex){MessageBox.Show(this,ex.Message,"导入失败，现有编辑已保留");}
+        }
+    }
 }
 static class Checks {
     static void Assert(bool yes,string message) { if(!yes)throw new Exception(message); }
@@ -541,7 +613,20 @@ static class Checks {
         string paired=extra.PairingText();Assert(paired.Contains("槽位 1：未配对") && !paired.Contains("stale") && paired.Contains("最近连接的蓝牙槽位：4") && paired.Contains("当前连接：USB"),"pairing empty slots and last/current distinction");
         using(var f=new MainForm()) { Assert(f.Controls.Count>0,"UI creation"); }
         using(var f=new Editor("test")){f.AddShortcut(s,0);Assert(f.AcceptButton!=null && f.CancelButton!=null,"dialog keyboard buttons");}
-        File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"self-test.txt"),"PASS: big-endian mapping; block boundaries; original isolation; dirty detection; shortcut decoding; change descriptions; unchanged block preservation; external change rejection; readback mismatch rejection; write error propagation; unsigned statistics decoding and descending sorting; name validation; UI construction; dialog keyboard actions.\r\nNo device I/O performed.");
+        s.Original[40]=new byte[32];s.Edit[40]=new byte[32];s.SetName("Config & Test");s.CustomEco=true;
+        string config=ConfigurationFile.Encode(s);
+        var imported=ConfigurationFile.Decode(config,s);
+        Assert(imported.All(p=>p.Value.SequenceEqual(s.Edit[p.Key])),"configuration JSON roundtrip");
+        imported[48][0]=5;Assert(s.Edit[48][0]==0 && s.Original[48][0]==0,"import isolates baseline and editor");
+        s.Edit[48][31]=123;imported=ConfigurationFile.Decode(config,s);Assert(imported[48][31]==123,"import preserves destination reserved bytes");
+        string compact=ConfigurationFile.Encode(s,false);
+        foreach(string invalid in new[]{compact.Replace("R3HB11","R3HB12"),compact.Replace("\"firmware\":\"test\"","\"firmware\":\"other\""),compact.Replace("\"formatVersion\":1","\"formatVersion\":99"),compact.Replace("\"apc\":0","\"apc\":6"),compact.Replace("\"eco\":0,",""),compact.Replace("\"apc\":0","\"apc\":0,\"apc\":1"),compact.Replace("\"apc\":0","\"apc\":\"0\""),compact.Replace("\"apc\":0","\"apc\":null"),compact.Replace("\"apc\":0","\"apc\":1.5"),compact.Replace("\"apc\":0","\"apc\":-1"),compact.Replace("\"key.16.layer.0\":0","\"key.16.layer.0\":65535"),compact+" garbage"}) {
+            rejected=false;try{ConfigurationFile.Decode(invalid,s);}catch(Exception){rejected=true;}
+            Assert(rejected && s.Edit[48][0]==0 && s.Edit[48][31]==123,"invalid import rejected atomically");
+        }
+        s.Edit[49][0]=1; var ignored=new List<string>();imported=ConfigurationFile.Decode(compact.Replace("\"settings\":{","\"battery\":99,\"settings\":{\"map\":0,\"pairing\":[1,2],\"rom.50\":255,"),s,ignored);
+        Assert(ignored.Count==4 && imported[49][0]==1 && imported.All(p=>p.Value.SequenceEqual(s.Edit[p.Key])),"read-only and unknown fields ignored without importing reserved memory");
+        File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"self-test.txt"),"PASS: configuration roundtrip, reserved byte preservation, baseline isolation and malformed/incompatible import rejection; big-endian mapping; block boundaries; dirty detection; shortcut decoding; external change rejection; readback mismatch rejection; write error propagation; statistics sorting; name validation; UI construction.\r\nNo device I/O performed.");
     }
 }
 }

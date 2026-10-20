@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 
 [assembly: AssemblyTitle("REALFORCE 无障碍助手")]
 [assembly: AssemblyDescription("适用于 REALFORCE R3HB11 的独立无障碍设置助手")]
@@ -11,11 +11,11 @@ using System.Reflection;
 
 namespace RealforceAccessible {
     static class AppInfo {
-        public const string Version="0.1.0";
+        public const string Version="0.2.1";
         public const string AssemblyVersion=Version+".0";
         public const string Developer="yxycode17";
         public const string Title="REALFORCE 无障碍助手 "+Version;
         public const string About="REALFORCE 无障碍助手\r\n版本："+Version+"\r\n开发者："+Developer+
-            "\r\n\r\n平台：AnyCPU（64 位 Windows 上以 64 位运行）。\r\n运行环境：Windows、.NET Framework 4.8。\r\n适配：R3HB11，REALFORCE 通信库 4.1.1.0。\r\n独立开发的辅助工具，非 Topre 官方软件。\r\n需保留原软件安装，以使用通信库和布局文件。";
+            "\r\n\r\n平台：AnyCPU（64 位 Windows 上以 64 位运行）。\r\n运行环境：Windows、.NET Framework 4.8。\r\n适配：R3HB11，REALFORCE 通信库 4.1.1.0。\r\n独立开发的辅助工具，非 Topre 官方软件。\r\n仅加载程序同目录的通信库和布局文件，无需安装原软件。";
     }
 }

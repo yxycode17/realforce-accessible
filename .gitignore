@@ -8,3 +8,5 @@
 **/last-error.txt
 .vs/
 obj/
+/dist/
+**/configuration-test.txt
