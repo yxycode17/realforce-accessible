@@ -99,15 +99,8 @@ JSON 的 `model`、`firmware` 等元数据仅用于校验，不会写入键盘�
 首次构建请按以下顺序准备：
 
 1. **先安装原版 REALFORCE CONNECT Software**，确保其中的 `RFSWLib.dll` 为本项目适配的 **4.1.1.0** 版本，并通过收集脚本的文件校验。
-2. 在项目根目录创建 `dist`，将原版安装目录中的以下两个文件复制进去，直接与助手 EXE 放在同一层，不保留 `Profile` 子目录：
-
-   | 原版安装目录中的文件 | 项目中的目标位置 |
-   | --- | --- |
-   | `RFSWLib.dll` | `dist\RFSWLib.dll` |
-   | `Profile\R30B.r3k` | `dist\R30B.r3k` |
-
-   也可以运行下面的 `Collect-Dependencies.ps1`，由脚本校验文件、创建 `dist` 并自动复制这两个依赖，无需手动复制。
-3. 在项目根目录运行 `build.ps1`，生成助手程序及使用说明。
+2. 在项目根目录运行 `tools\Collect-Dependencies.ps1`，自动校验并收集依赖，**无需手动创建目录或复制文件**。
+3. 运行 `build.ps1`，将助手程序和使用说明生成到 `dist`。
 
 安装原版后，可在项目根目录的 Windows PowerShell 中依次执行：
 
@@ -118,7 +111,24 @@ JSON 的 `model`、`firmware` 等元数据仅用于校验，不会写入键盘�
 
 使用系统 .NET Framework 编译器，不需要 NuGet 还原。输出固定为 `dist`，只保留一份成品；请先退出正在运行的助手再构建。
 
+### 各脚本的作用
+
+| 脚本 | 具体功能 | 何时运行 |
+| --- | --- | --- |
+| `tools\Collect-Dependencies.ps1` | 校验原版通信库及布局文件的 SHA-256；自动创建 `dist`，将 `RFSWLib.dll` 复制为 `dist\RFSWLib.dll`，将 `Profile\R30B.r3k` 复制为 `dist\R30B.r3k`。不会复制原版 EXE。 | 首次构建，或 `dist` 中依赖文件丢失时。 |
+| `build.ps1` | 引用 `dist` 中的通信库，编译助手并嵌入图标、键码名称表和版本信息；输出 `dist\RealforceAccessible.exe`，同时复制使用说明到 `dist`。 | 每次修改源码后重新构建。 |
+| `tools\Convert-Icon.ps1` | 将 `assets\assistant.png` 转换为包含多个尺寸的 `assets\assistant.ico`。仓库已包含生成好的 ICO。 | 仅在更换图标源图时运行；普通构建无需运行。 |
+
 收集脚本默认读取 `C:\Program Files (x86)\Topre\REALFORCE CONNECT Software`，可用 `-SourceDirectory` 指定其他原版目录。收集一次后，构建和运行都只使用 `dist` 内的厂商文件，不再需要原版安装。部署时复制整个目录，不能只复制 EXE。
+
+例如，原版安装在其他位置时：
+
+```powershell
+.\tools\Collect-Dependencies.ps1 -SourceDirectory 'D:\Apps\REALFORCE CONNECT Software'
+.\build.ps1
+```
+
+### 构建后检查
 
 离线检查不访问键盘：
 
@@ -137,7 +147,7 @@ resources/    键码名称表
 assets/       图标源图、Windows 图标和来源说明
 tools/        依赖收集、图标格式转换、开发诊断源码
 docs/         详细使用说明
-dist/      唯一成品目录（Git 忽略）
+dist/         唯一成品目录（Git 忽略）
 build.ps1     构建入口
 ```
 
