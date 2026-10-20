@@ -11,7 +11,7 @@
 
 namespace RealforceAccessible {
     static class AppInfo {
-        public const string Version="0.2.2";
+        public const string Version="0.2.3";
         public const string AssemblyVersion=Version+".0";
         public const string Developer="yxycode17";
         public const string Title="REALFORCE 无障碍助手 "+Version;

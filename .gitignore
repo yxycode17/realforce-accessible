@@ -10,3 +10,4 @@
 obj/
 /dist/
 **/configuration-test.txt
+**/firmware-probe.txt

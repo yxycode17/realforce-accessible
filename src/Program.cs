@@ -40,6 +40,15 @@ static class Program {
             return devices.Count == 0 ? 2 : 0;
         }
         if(args.Length > 0 && args[0] == "--self-test") { Checks.Run(); return 0; }
+        if(args.Length > 0 && args[0] == "--firmware-probe") {
+            var devices=Backend.Discover();if(devices.Count!=1)throw new IOException("此检查要求一台支持的 USB 键盘。");
+            if(KeyboardEnumurator.isBleConnect(devices[0].Path))throw new IOException("此检查仅支持 USB。");
+            using(var transport=new FirmwareTransport(devices[0].Path)) {
+                var identity=transport.Identity();
+                if(identity.Hardware.Length!=10 || identity.Compare.Length!=6 || identity.Model!=devices[0].Model)throw new IOException("固件身份字段格式不符。");
+                File.WriteAllText(Path.Combine(RuntimeDirectory,"firmware-probe.txt"),"Read-only firmware identity check. No upgrade commands.\r\nModel="+identity.Model+"\r\nVersion="+identity.Version+"\r\nCompare="+identity.Compare+"\r\nHardware="+identity.Hardware);
+            }return 0;
+        }
         if(args.Length > 0 && args[0] == "--configuration-test") {
             var ds=Backend.Discover();if(ds.Count!=1)throw new IOException("此检查要求连接一台支持的键盘。");
             var s=Backend.Read(ds[0]);var imported=ConfigurationFile.Decode(ConfigurationFile.Encode(s),s);
@@ -197,6 +206,7 @@ static class Backend {
     }
     public static void Check(LibParam.AppError e,string op) { if(e!=LibParam.AppError.NoError) throw new IOException(op+"失败："+e); }
     public static void Exclusive() {
+        FirmwareActivity.CheckIdle();
         CheckLibrary();
         if(Process.GetProcessesByName("REALFORCE Software").Length>0 || Process.GetProcessesByName("REALFORCE CONNECT").Length>0)
             throw new InvalidOperationException("请先退出原 REALFORCE 设置程序和 CONNECT，再读取或保存，避免同时访问设备。");
@@ -452,6 +462,7 @@ sealed class MainForm : Form {
         bottom.Controls.Add(UI.Button("放弃修改(&R)",(s,e)=>Discard()));
         bottom.Controls.Add(UI.Button("导入配置(&I)",(s,e)=>ImportConfiguration()));
         bottom.Controls.Add(UI.Button("导出配置(&X)",(s,e)=>ExportConfiguration()));
+        bottom.Controls.Add(UI.Button("固件更新(&U)",async(s,e)=>await UpdateFirmware()));
         bottom.Controls.Add(UI.Button("关闭(&C)",(s,e)=>Close()));
         Controls.Add(tabs); Controls.Add(top); Controls.Add(bottom); Controls.Add(message);
         bottom.Controls.Add(UI.Button("关于(&A)",(s,e)=>UI.TextDialog(this,"关于助手",AppInfo.About)));
@@ -589,6 +600,27 @@ sealed class MainForm : Form {
         if(snapshot==null || snapshot.NeedsRefresh){MessageBox.Show(this,"请先按 F5 成功读取键盘配置。","配置文件");return false;}
         return true;
     }
+    async Task UpdateFirmware() {
+        if(!ConfigurationReady())return;
+        if(snapshot.Dirty){MessageBox.Show(this,"请先保存或放弃助手中的配置编辑，再更新固件。","存在未保存编辑");return;}
+        var device=snapshot.Device;FirmwarePlan plan=null;
+        using(var file=new OpenFileDialog{Title="选择官方固件文件",Filter="固件文件|*.*",CheckFileExists=true}) {
+            if(file.ShowDialog(this)!=DialogResult.OK)return;
+            await Work(async()=>{plan=await Task.Run(()=>FirmwarePlan.Prepare(device,file.FileName));message.Text="固件校验通过，等待确认。";},status);
+        }
+        if(plan==null || IsDisposed || Disposing)return;
+        bool completed,attempted;
+        using(var dialog=new FirmwareDialog(plan)){dialog.ShowDialog(this);completed=dialog.Completed;attempted=dialog.Attempted;}
+        if(attempted && snapshot!=null){snapshot.NeedsRefresh=true;Render();}
+        if(completed) {
+            snapshot=null;Render();
+            await Work(async()=>{
+                try{snapshot=await Task.Run(()=>Backend.Read(device));Render();message.Text="固件更新完成，已自动刷新键盘状态。";tabs.SelectedIndex=0;MessageBox.Show(this,"固件更新完成，型号和版本已核对，键盘状态已自动刷新。","更新完成");}
+                catch(Exception ex){throw new IOException("固件版本已核对成功，但自动刷新状态失败。请按 F5 重试读取，不要因此重复刷写。\r\n"+ex.Message,ex);}
+            },status);
+        }
+        else message.Text=attempted?"固件更新未完成。请先确认设备状态并重新读取。":"固件更新未开始。";
+    }
     void ExportConfiguration() {
         if(!ConfigurationReady())return;
         using(var d=new SaveFileDialog{Filter="助手配置文件 (*.json)|*.json",DefaultExt="json",FileName="REALFORCE-"+snapshot.Device.Model+"-"+DateTime.Now.ToString("yyyyMMdd-HHmmss")+".json"}) {
@@ -614,6 +646,7 @@ sealed class MainForm : Form {
 static class Checks {
     static void Assert(bool yes,string message) { if(!yes)throw new Exception(message); }
     public static void Run() {
+        FirmwareChecks.Run();
         foreach(string model in new[]{"R3HB11","R3HB13","r3hb13","R3HB12","R3HB21","R3HB23"})Assert(Device.IsSupported(model),"supported HB family");
         foreach(string model in new[]{null,"","R3HB","R3HB/11","R3HB11 ","R3HA11","R3HC11","R3HD11","R3HE11","R3HF11","R3HG11","R3HH11","R3HI11","R3SB11","R4HB11"})Assert(!Device.IsSupported(model),"unadapted model rejected");
         var s=new Snapshot{Device=new Device{Model="R3HB11"},Firmware="test",ShortcutCount=8};
@@ -697,7 +730,7 @@ static class Checks {
             normal.SelectedIndex=normal.Items.Cast<Choice>().ToList().FindIndex(c=>c.Value==4096);
             Assert(!fn.Enabled && UI.Value(fn)==s.OriginalMapping(1,16),"changing normal to Fn reverts pending Fn layer edit");
         }
-        File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"self-test.txt"),"PASS: configuration roundtrip, reserved byte preservation, baseline isolation and malformed/incompatible import rejection; big-endian mapping; block boundaries; dirty detection; shortcut decoding; external change rejection; readback mismatch rejection; write error propagation; statistics sorting; name validation; UI construction.\r\nNo device I/O performed.");
+        File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"self-test.txt"),"PASS: firmware image checks, packet sequencing and failure-stop simulations; configuration roundtrip, reserved byte preservation, baseline isolation and malformed/incompatible import rejection; big-endian mapping; block boundaries; dirty detection; shortcut decoding; external change rejection; readback mismatch rejection; write error propagation; statistics sorting; name validation; UI construction.\r\nNo device I/O performed.");
     }
 }
 }
